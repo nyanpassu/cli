@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/table"
-	"github.com/projecteru2/core/cluster"
 	pb "github.com/projecteru2/core/rpc/gen"
 	log "github.com/sirupsen/logrus"
 	cli "github.com/urfave/cli/v2"
@@ -23,31 +22,31 @@ func NodeCommand() *cli.Command {
 		Name:  "node",
 		Usage: "node commands",
 		Subcommands: []*cli.Command{
-			&cli.Command{
+			{
 				Name:      "get",
 				Usage:     "get a node",
 				ArgsUsage: nodeArgsUsage,
 				Action:    getNode,
 			},
-			&cli.Command{
+			{
 				Name:      "remove",
 				Usage:     "remove a node",
 				ArgsUsage: nodeArgsUsage,
 				Action:    removeNode,
 			},
-			&cli.Command{
+			{
 				Name:      "containers",
 				Usage:     "list node containers",
 				ArgsUsage: nodeArgsUsage,
 				Action:    listNodeContainers,
 			},
-			&cli.Command{
+			{
 				Name:      "up",
 				Usage:     "set node up",
 				ArgsUsage: nodeArgsUsage,
 				Action:    setNodeUp,
 			},
-			&cli.Command{
+			{
 				Name:  "down",
 				Usage: "set node down",
 				Flags: []cli.Flag{
@@ -64,13 +63,19 @@ func NodeCommand() *cli.Command {
 				ArgsUsage: nodeArgsUsage,
 				Action:    setNodeDown,
 			},
-			&cli.Command{
+			{
 				Name:      "resource",
 				Usage:     "check node resource",
 				ArgsUsage: nodeArgsUsage,
-				Action:    nodeResource,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "fix",
+						Usage: "fix node resource diff",
+					},
+				},
+				Action: nodeResource,
 			},
-			&cli.Command{
+			{
 				Name:      "set",
 				Usage:     "set node resource",
 				ArgsUsage: nodeArgsUsage,
@@ -110,7 +115,7 @@ func NodeCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "add",
 				Usage:     "add node",
 				ArgsUsage: "podname",
@@ -183,7 +188,7 @@ func NodeCommand() *cli.Command {
 }
 
 func listNodeContainers(c *cli.Context) error {
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 
 	nodename := c.Args().First()
 	if nodename == "" {
@@ -198,19 +203,15 @@ func listNodeContainers(c *cli.Context) error {
 		return cli.Exit(err, -1)
 	}
 
-	containers := []*pb.Container{}
-	for _, container := range resp.Containers {
-		containers = append(containers, container)
-	}
-
+	containers := resp.Containers
 	if c.Bool("pretty") {
 		t := table.NewWriter()
 		t.SetOutputMirror(os.Stdout)
 		t.AppendHeader(table.Row{"Name/ID", "Information"})
 		for _, c := range containers {
 			rows := [][]string{
-				[]string{c.Name, c.Id},
-				[]string{
+				{c.Name, c.Id},
+				{
 					fmt.Sprintf("Pod: %s", c.Podname),
 					fmt.Sprintf("Node: %s", c.Nodename),
 					fmt.Sprintf("CPU: %v", c.Cpu),
@@ -269,7 +270,7 @@ func getNode(c *cli.Context) error {
 	if node.GetInitStorage() > 0 {
 		log.Infof("Storage Used: %d bytes", node.GetStorageUsed())
 	} else {
-		log.Infof("Storage Used: %d bytes (unlimited)", node.GetStorageUsed())
+		log.Infof("Storage Used: %d bytes (%s)", node.GetStorageUsed(), unlimited)
 	}
 	return nil
 }
@@ -334,7 +335,8 @@ func setNode(c *cli.Context) error {
 		cpuMapList := strings.Split(cpuList, ",")
 		for _, cpus := range cpuMapList {
 			cpuConfigs := strings.Split(cpus, ":")
-			share, err := strconv.Atoi(cpuConfigs[1])
+			// G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+			share, err := strconv.Atoi(cpuConfigs[1]) // nolint
 			if err != nil {
 				return cli.Exit(err, -1)
 			}
@@ -371,7 +373,7 @@ func setNode(c *cli.Context) error {
 
 	_, err = client.SetNode(context.Background(), &pb.SetNodeOptions{
 		Nodename:        name,
-		Status:          cluster.KeepNodeStatus,
+		Status:          pb.TriOpt_KEEP,
 		DeltaCpu:        cpuMap,
 		DeltaMemory:     deltaMemory,
 		DeltaStorage:    deltaStorage,
@@ -396,7 +398,7 @@ func setNodeUp(c *cli.Context) error {
 	name := c.Args().First()
 	_, err = client.SetNode(context.Background(), &pb.SetNodeOptions{
 		Nodename: name,
-		Status:   cluster.NodeUp,
+		Status:   pb.TriOpt_TRUE,
 	})
 	if err != nil {
 		return cli.Exit(err, -1)
@@ -416,7 +418,7 @@ func setNodeDown(c *cli.Context) error {
 		t := c.Int("check-timeout")
 		timeout, cancel := context.WithTimeout(c.Context, time.Duration(t)*time.Second)
 		defer cancel()
-		if _, err := client.GetNodeResource(timeout, &pb.GetNodeOptions{Nodename: name}); err == nil {
+		if _, err := client.GetNodeResource(timeout, &pb.GetNodeResourceOptions{Opts: &pb.GetNodeOptions{Nodename: name}}); err == nil {
 			log.Warn("[SetNode] node is not down")
 			do = false
 		}
@@ -425,7 +427,7 @@ func setNodeDown(c *cli.Context) error {
 	if do {
 		_, err = client.SetNode(context.Background(), &pb.SetNodeOptions{
 			Nodename: name,
-			Status:   cluster.NodeDown,
+			Status:   pb.TriOpt_FALSE,
 		})
 		if err != nil {
 			return cli.Exit(err, -1)
@@ -450,7 +452,7 @@ func getLocalIP() string {
 	return ""
 }
 
-func addNode(c *cli.Context) error {
+func addNode(c *cli.Context) error { // nolint
 	podname := c.Args().First()
 	if podname == "" {
 		return cli.Exit(fmt.Errorf("podname must not be empty"), -1)
@@ -623,7 +625,13 @@ func nodeResource(c *cli.Context) error {
 		return cli.Exit(err, -1)
 	}
 	name := c.Args().First()
-	r, err := client.GetNodeResource(context.Background(), &pb.GetNodeOptions{Nodename: name})
+	r, err := client.GetNodeResource(
+		context.Background(),
+		&pb.GetNodeResourceOptions{
+			Opts: &pb.GetNodeOptions{Nodename: name},
+			Fix:  c.Bool("fix"),
+		},
+	)
 	if err != nil {
 		return cli.Exit(err, -1)
 	}
@@ -631,15 +639,13 @@ func nodeResource(c *cli.Context) error {
 	if c.Bool("pretty") {
 		t := table.NewWriter()
 		t.SetOutputMirror(os.Stdout)
-		t.AppendHeader(table.Row{"Name", "Resource"})
+		t.AppendHeader(table.Row{"Name", "Cpu", "Memory", "Storage", "Volume"})
 		rows := [][]string{
-			[]string{r.Name},
-			[]string{
-				fmt.Sprintf("Cpu: %.2f%%", r.CpuPercent*100),
-				fmt.Sprintf("Memory: %.2f%%", r.MemoryPercent*100),
-				fmt.Sprintf("Storage: %.2f%%", r.StoragePercent*100),
-				fmt.Sprintf("Volume: %.2f%%", r.VolumePercent*100),
-			},
+			{r.Name},
+			{fmt.Sprintf("%.2f%%", r.CpuPercent*100)},
+			{fmt.Sprintf("%.2f%%", r.MemoryPercent*100)},
+			{fmt.Sprintf("%.2f%%", r.StoragePercent*100)},
+			{fmt.Sprintf("%.2f%%", r.VolumePercent*100)},
 		}
 		t.AppendRows(toTableRows(rows))
 		t.AppendSeparator()
@@ -648,10 +654,10 @@ func nodeResource(c *cli.Context) error {
 	} else {
 		log.Infof("[NodeResource] Node %s", r.Name)
 		log.Infof("[NodeResource] Cpu %.2f%% Memory %.2f%% Storage %.2f%% Volume %.2f%%", r.CpuPercent*100, r.MemoryPercent*100, r.StoragePercent*100, r.VolumePercent*100)
-		if !r.Verification {
-			for _, detail := range r.Details {
-				log.Warnf("[NodeResource] Resource diff %s", detail)
-			}
+	}
+	if !r.Verification {
+		for _, detail := range r.Details {
+			log.Warnf("[NodeResource] Resource diff %s", detail)
 		}
 	}
 	return nil

@@ -10,19 +10,18 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-func init() {
+func main() {
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Print(versioninfo.VersionString())
 	}
-}
 
-func main() {
 	app := cli.App{}
 	app.Name = versioninfo.NAME
 	app.Usage = "control eru in shell"
 	app.Version = versioninfo.VERSION
 
 	app.Commands = []*cli.Command{
+		commands.CoreCommand(),
 		commands.ContainerCommand(),
 		commands.PodCommand(),
 		commands.NodeCommand(),
@@ -30,9 +29,10 @@ func main() {
 		commands.LambdaCommand(),
 		commands.StatusCommand(),
 		commands.PublishCommand(),
+		commands.NetworkCommand(),
 	}
 
 	app.Flags = commands.GlobalFlags()
 	logrus.SetOutput(os.Stdout)
-	app.Run(os.Args)
+	_ = app.Run(os.Args)
 }

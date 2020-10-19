@@ -11,14 +11,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/jedib0t/go-pretty/table"
 	"github.com/projecteru2/cli/utils"
 	"github.com/projecteru2/core/cluster"
 	pb "github.com/projecteru2/core/rpc/gen"
+	"github.com/projecteru2/core/strategy"
 	coreutils "github.com/projecteru2/core/utils"
 	log "github.com/sirupsen/logrus"
 	cli "github.com/urfave/cli/v2"
 )
+
+const unlimited = "UNLIMITED"
 
 // ContainerCommand for control containers
 func ContainerCommand() *cli.Command {
@@ -26,13 +30,13 @@ func ContainerCommand() *cli.Command {
 		Name:  "container",
 		Usage: "container commands",
 		Subcommands: []*cli.Command{
-			&cli.Command{
+			{
 				Name:      "get",
 				Usage:     "get container(s)",
 				ArgsUsage: containerArgsUsage,
 				Action:    getContainers,
 			},
-			&cli.Command{
+			{
 				Name:      "logs",
 				Usage:     "get container stream logs",
 				ArgsUsage: "containerID",
@@ -45,13 +49,13 @@ func ContainerCommand() *cli.Command {
 				},
 				Action: getContainerLog,
 			},
-			&cli.Command{
+			{
 				Name:      "get-status",
 				Usage:     "get container status",
 				ArgsUsage: containerArgsUsage,
 				Action:    getContainersStatus,
 			},
-			&cli.Command{
+			{
 				Name:      "set-status",
 				Usage:     "set container status",
 				ArgsUsage: containerArgsUsage,
@@ -80,7 +84,7 @@ func ContainerCommand() *cli.Command {
 				},
 				Action: setContainersStatus,
 			},
-			&cli.Command{
+			{
 				Name:      "list",
 				Usage:     "list container(s) by appname",
 				ArgsUsage: "[appname]",
@@ -104,7 +108,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "stop",
 				Usage:     "stop container(s)",
 				ArgsUsage: containerArgsUsage,
@@ -118,7 +122,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "start",
 				Usage:     "start container(s)",
 				ArgsUsage: containerArgsUsage,
@@ -132,7 +136,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "restart",
 				Usage:     "restart container(s)",
 				ArgsUsage: containerArgsUsage,
@@ -146,7 +150,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "remove",
 				Usage:     "remove container(s)",
 				ArgsUsage: containerArgsUsage,
@@ -166,7 +170,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "copy",
 				Usage:     "copy file(s) from container(s)",
 				ArgsUsage: copyArgsUsage,
@@ -180,7 +184,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "send",
 				Usage:     "send file(s) to container(s)",
 				ArgsUsage: sendArgsUsage,
@@ -192,13 +196,13 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "dissociate",
 				Usage:     "Dissociate container(s) from eru, return it resource but not remove it",
 				ArgsUsage: containerArgsUsage,
 				Action:    dissociateContainers,
 			},
-			&cli.Command{
+			{
 				Name:      "realloc",
 				Usage:     "realloc containers resource",
 				ArgsUsage: containerArgsUsage,
@@ -208,13 +212,13 @@ func ContainerCommand() *cli.Command {
 						Name:    "cpu",
 						Usage:   "cpu increment/decrement",
 						Aliases: []string{"c"},
-						Value:   1.0,
+						Value:   0,
 					},
 					&cli.StringFlag{
 						Name:    "memory",
 						Usage:   "memory increment/decrement, like -1M or 1G, support K, M, G, T",
 						Aliases: []string{"m"},
-						Value:   "1G",
+						Value:   "0",
 					},
 					&cli.StringFlag{
 						Name:  "volumes",
@@ -228,9 +232,17 @@ func ContainerCommand() *cli.Command {
 						Name:  "cpu-unbind",
 						Usage: `unbind the container relation with cpu`,
 					},
+					&cli.BoolFlag{
+						Name:  "memory-softlimit",
+						Usage: `force softlimit memory`,
+					},
+					&cli.BoolFlag{
+						Name:  "memory-hardlimit",
+						Usage: `force hardlimit memory`,
+					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "exec",
 				Usage:     "run a command in a running container",
 				ArgsUsage: "containerID -- cmd1 cmd2 cmd3",
@@ -254,7 +266,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "replace",
 				Usage:     "replace containers by params",
 				ArgsUsage: specFileURI,
@@ -328,7 +340,7 @@ func ContainerCommand() *cli.Command {
 					},
 				},
 			},
-			&cli.Command{
+			{
 				Name:      "deploy",
 				Usage:     "deploy containers by params",
 				ArgsUsage: specFileURI,
@@ -346,10 +358,9 @@ func ContainerCommand() *cli.Command {
 						Name:  "image",
 						Usage: "which to run",
 					},
-					&cli.StringFlag{
+					&cli.StringSliceFlag{
 						Name:  "node",
 						Usage: "which node to run",
-						Value: "",
 					},
 					&cli.IntFlag{
 						Name:  "count",
@@ -385,9 +396,9 @@ func ContainerCommand() *cli.Command {
 						Usage: "filter nodes by labels",
 					},
 					&cli.StringFlag{
-						Name:  "deploy-method",
+						Name:  "deploy-strategy",
 						Usage: "deploy method auto/fill/each/global",
-						Value: cluster.DeployAuto,
+						Value: strategy.Auto,
 					},
 					&cli.StringFlag{
 						Name:  "user",
@@ -476,10 +487,23 @@ func removeContainers(c *cli.Context) error {
 }
 
 func renderContainer(container *pb.Container) {
+	cpu := unlimited
+	if container.Quota != 0 {
+		cpu = fmt.Sprintf("%v", container.Quota)
+	}
+	memory := unlimited
+	if container.Memory != 0 {
+		memory = units.HumanSize(float64(container.Memory))
+	}
+	storage := unlimited
+	if container.Storage != 0 {
+		storage = units.HumanSize(float64(container.Storage))
+	}
 	log.Info("--------------------------------------")
 	log.Infof("%s: %s", container.Name, container.Id)
 	log.Infof("Pod: %s, Node: %s", container.Podname, container.Nodename)
-	log.Infof("CPU: %v, Quota: %v, Memory: %v, Storage: %v, Volume: %+v, VolumePlan: %+v, Privileged %v", container.Cpu, container.Quota, container.Memory, container.Storage, container.Volumes, container.VolumePlan, container.Privileged)
+	log.Infof("Quota: %v, Memory: %v, Storage: %v", cpu, memory, storage)
+	log.Infof("CPU: %v, Volume: %+v, VolumePlan: %+v, Privileged %v", container.Cpu, container.Volumes, container.VolumePlan, container.Privileged)
 	for networkName, IP := range container.Publish {
 		log.Infof("Publish at %s ip %s", networkName, IP)
 	}
@@ -511,10 +535,10 @@ func prettyRenderContianers(containers []*pb.Container) {
 		}
 
 		rows := [][]string{
-			[]string{c.Name, c.Id},
-			[]string{c.Podname},
-			[]string{c.Nodename},
-			[]string{fmt.Sprintf("Quota: %f", c.Quota), fmt.Sprintf("Memory: %v", c.Memory), fmt.Sprintf("Storage: %v", c.Storage), fmt.Sprintf("Privileged: %v", c.Privileged)},
+			{c.Name, c.Id},
+			{c.Podname},
+			{c.Nodename},
+			{fmt.Sprintf("Quota: %f", c.Quota), fmt.Sprintf("Memory: %v", c.Memory), fmt.Sprintf("Storage: %v", c.Storage), fmt.Sprintf("Privileged: %v", c.Privileged)},
 			c.Volumes,
 			ips,
 			ns,
@@ -549,15 +573,18 @@ func prettyRenderContainerStatus(containerStatuses []*pb.ContainerStatus) {
 
 		// extensions
 		extensions := map[string]string{}
-		json.Unmarshal(s.Extension, &extensions)
+		if err := json.Unmarshal(s.Extension, &extensions); err != nil {
+			log.Errorf("json unmarshal failed %v", err)
+			continue
+		}
 		es := []string{}
 		for k, v := range extensions {
 			es = append(es, fmt.Sprintf("%s: %s", k, v))
 		}
 
 		rows := [][]string{
-			[]string{s.Id},
-			[]string{fmt.Sprintf("Running: %v", s.Running), fmt.Sprintf("Healthy: %v", s.Healthy)},
+			{s.Id},
+			{fmt.Sprintf("Running: %v", s.Running), fmt.Sprintf("Healthy: %v", s.Healthy)},
 			ns,
 			es,
 		}
@@ -579,14 +606,10 @@ func getContainers(c *cli.Context) error {
 		return cli.Exit(err, -1)
 	}
 
-	containers := []*pb.Container{}
-	for _, container := range resp.GetContainers() {
-		containers = append(containers, container)
-	}
 	if c.Bool("pretty") {
-		prettyRenderContianers(containers)
+		prettyRenderContianers(resp.Containers)
 	} else {
-		for _, container := range containers {
+		for _, container := range resp.Containers {
 			renderContainer(container)
 		}
 	}
@@ -604,14 +627,10 @@ func getContainersStatus(c *cli.Context) error {
 		return cli.Exit(err, -1)
 	}
 
-	containerStatuses := []*pb.ContainerStatus{}
-	for _, containerStatus := range resp.Status {
-		containerStatuses = append(containerStatuses, containerStatus)
-	}
 	if c.Bool("pretty") {
-		prettyRenderContainerStatus(containerStatuses)
+		prettyRenderContainerStatus(resp.Status)
 	} else {
-		for _, containerStatus := range containerStatuses {
+		for _, containerStatus := range resp.Status {
 			renderContainerStatus(containerStatus)
 		}
 	}
@@ -647,14 +666,10 @@ func setContainersStatus(c *cli.Context) error {
 		return cli.Exit(err, -1)
 	}
 
-	containerStatuses := []*pb.ContainerStatus{}
-	for _, containerStatus := range resp.Status {
-		containerStatuses = append(containerStatuses, containerStatus)
-	}
 	if c.Bool("pretty") {
-		prettyRenderContainerStatus(containerStatuses)
+		prettyRenderContainerStatus(resp.Status)
 	} else {
-		for _, containerStatus := range containerStatuses {
+		for _, containerStatus := range resp.Status {
 			renderContainerStatus(containerStatus)
 		}
 	}
@@ -662,7 +677,7 @@ func setContainersStatus(c *cli.Context) error {
 }
 
 func listContainers(c *cli.Context) error {
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 
 	opts := &pb.ListContainersOptions{
 		Appname:    c.Args().First(),
@@ -718,15 +733,32 @@ func reallocContainers(c *cli.Context) error {
 	if bindCPU && unbindCPU {
 		return cli.Exit(errors.New("cpu-bind and cpu-unbind can not both be set"), -1)
 	}
-	bindCPUOps := pb.BindCPUOpt_KEEP
+	bindCPUOpt := pb.TriOpt_KEEP
 	if bindCPU {
-		bindCPUOps = pb.BindCPUOpt_BIND
+		bindCPUOpt = pb.TriOpt_TRUE
 	}
 	if unbindCPU {
-		bindCPUOps = pb.BindCPUOpt_UNBIND
+		bindCPUOpt = pb.TriOpt_FALSE
 	}
 
-	opts := &pb.ReallocOptions{Ids: c.Args().Slice(), Cpu: c.Float64("cpu"), Memory: memory, Volumes: volumes, BindCpuOpt: bindCPUOps}
+	memorySoftlimit := c.Bool("memory-softlimit")
+	memoryHardlimit := c.Bool("memory-hardlimit")
+	if memorySoftlimit && memoryHardlimit {
+		return cli.Exit(errors.New("memory-softlimit and memory-hardlimit can not both be set"), -1)
+	}
+	memoryLimitOpt := pb.TriOpt_KEEP
+	if memorySoftlimit {
+		memoryLimitOpt = pb.TriOpt_TRUE
+	}
+	if memoryHardlimit {
+		memoryLimitOpt = pb.TriOpt_FALSE
+	}
+
+	opts := &pb.ReallocOptions{
+		Ids: c.Args().Slice(), Cpu: c.Float64("cpu"),
+		Memory: memory, Volumes: volumes,
+		BindCpu: bindCPUOpt, MemoryLimit: memoryLimitOpt,
+	}
 
 	resp, err := client.ReallocResource(context.Background(), opts)
 	if err != nil {
@@ -752,7 +784,7 @@ func reallocContainers(c *cli.Context) error {
 }
 
 func execContainer(c *cli.Context) (err error) {
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 
 	opts := &pb.ExecuteContainerOptions{
 		ContainerId: c.Args().First(),

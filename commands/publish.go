@@ -14,8 +14,8 @@ import (
 	pb "github.com/projecteru2/core/rpc/gen"
 	coreutils "github.com/projecteru2/core/utils"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	cli "github.com/urfave/cli/v2"
+	"golang.org/x/net/context"
 )
 
 // PublishCommand for publish containers
@@ -24,13 +24,13 @@ func PublishCommand() *cli.Command {
 		Name:  "publish",
 		Usage: "publish commands",
 		Subcommands: []*cli.Command{
-			&cli.Command{
+			{
 				Name:      "dump",
 				Usage:     "dump elb things",
 				ArgsUsage: "elb url",
 				Action:    dumpELB,
 			},
-			&cli.Command{
+			{
 				Name:      "update",
 				Usage:     "update publish things",
 				ArgsUsage: specFileURI,
@@ -61,7 +61,7 @@ func PublishCommand() *cli.Command {
 					},
 					&cli.StringFlag{
 						Name:  "upstream-name",
-						Usage: "custom upstream name, if not set, will use app_verison_entry",
+						Usage: "custom upstream name, if not set, will use app_version_entry",
 						Value: "",
 					},
 				},
@@ -81,7 +81,7 @@ func dumpELB(c *cli.Context) error {
 }
 
 func publishContainers(c *cli.Context) error {
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 
 	app := c.String("app")
 	elb := c.String("elb")
@@ -94,12 +94,12 @@ func publishContainers(c *cli.Context) error {
 	}
 
 	specURI := c.Args().First()
-	if specURI != "" {
+	if specURI != "" { // nolint
 		log.Debugf("[Publish] Publish %s", specURI)
 
 		var data []byte
 		var err error
-		domain := []byte{}
+		var domain []byte
 		if strings.HasPrefix(specURI, "http") {
 			data, err = utils.GetSpecFromRemote(specURI)
 		} else {

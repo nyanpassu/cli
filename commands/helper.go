@@ -77,14 +77,13 @@ func parseRAMInHuman(ramStr string) (int64, error) {
 }
 
 func handleInteractiveStream(interactive bool, iStream interactiveStream, exitCount int) (code int, err error) {
-
-	if interactive {
+	if interactive { // nolint
 		stdinFd := os.Stdin.Fd()
 		terminal := &syscall.Termios{}
-		termios.Tcgetattr(stdinFd, terminal)
+		_ = termios.Tcgetattr(stdinFd, terminal)
 		terminalBak := &syscall.Termios{}
-		deepcopy.Copy(terminalBak, terminal)
-		defer termios.Tcsetattr(stdinFd, termios.TCSANOW, terminalBak)
+		_ = deepcopy.Copy(terminalBak, terminal)
+		defer func() { _ = termios.Tcsetattr(stdinFd, termios.TCSANOW, terminalBak) }()
 
 		terminal.Lflag &^= syscall.ECHO   // off echoing
 		terminal.Lflag &^= syscall.ICANON // noncanonical mode
@@ -106,14 +105,14 @@ func handleInteractiveStream(interactive bool, iStream interactiveStream, exitCo
 		terminal.Cc[syscall.VMIN] = 1  // character-at-a-time input
 		terminal.Cc[syscall.VTIME] = 0 // blocking
 
-		termios.Tcsetattr(stdinFd, termios.TCSAFLUSH, terminal)
+		_ = termios.Tcsetattr(stdinFd, termios.TCSAFLUSH, terminal)
 
 		// capture SIGWINCH and measure window size
 		sigs := make(chan os.Signal)
 		signal.Notify(sigs, syscall.SIGWINCH)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		resize := func(ctx context.Context) error {
+		resize := func(_ context.Context) error {
 			w := &window{}
 			if _, _, err := syscall.Syscall(syscall.SYS_IOCTL, stdinFd, syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(w))); err != 0 {
 				return err
@@ -209,5 +208,5 @@ func handleInteractiveStream(interactive bool, iStream interactiveStream, exitCo
 		}
 	}
 
-	return
+	return code, err
 }

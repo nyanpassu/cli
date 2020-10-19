@@ -22,7 +22,7 @@ func ImageCommand() *cli.Command {
 		Name:  "image",
 		Usage: "image commands",
 		Subcommands: []*cli.Command{
-			&cli.Command{
+			{
 				Name:      "build",
 				Usage:     "build image",
 				ArgsUsage: specFileURI,
@@ -62,12 +62,12 @@ func ImageCommand() *cli.Command {
 				},
 				Action: buildImage,
 			},
-			&cli.Command{
+			{
 				Name:      "cache",
 				Usage:     "cache image",
 				ArgsUsage: "name of images",
 				Flags: []cli.Flag{
-					&cli.StringFlag{
+					&cli.StringSliceFlag{
 						Name:  "nodename",
 						Usage: "nodename if you just want to cache on one node",
 					},
@@ -83,12 +83,12 @@ func ImageCommand() *cli.Command {
 				},
 				Action: cacheImage,
 			},
-			&cli.Command{
+			{
 				Name:      "remove",
 				Usage:     "remove image",
 				ArgsUsage: "name of images",
 				Flags: []cli.Flag{
-					&cli.StringFlag{
+					&cli.StringSliceFlag{
 						Name:  "nodename",
 						Usage: "nodename if you just want to cache on one node",
 					},
@@ -115,7 +115,7 @@ func ImageCommand() *cli.Command {
 
 func buildImage(c *cli.Context) error {
 	opts := generateBuildOpts(c)
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 	resp, err := client.BuildImage(context.Background(), opts)
 	if err != nil {
 		return cli.Exit(err, -1)
@@ -133,7 +133,7 @@ func buildImage(c *cli.Context) error {
 			return cli.Exit(err, -1)
 		}
 
-		if msg.Error != "" {
+		if msg.Error != "" { // nolint
 			return cli.Exit(msg.ErrorDetail.Message, int(msg.ErrorDetail.Code))
 		} else if msg.Stream != "" {
 			fmt.Print(msg.Stream)
@@ -169,13 +169,13 @@ func buildImage(c *cli.Context) error {
 
 func cacheImage(c *cli.Context) error {
 	opts := &pb.CacheImageOptions{
-		Images:   c.Args().Slice(),
-		Step:     int32(c.Int("concurrent")),
-		Podname:  c.String("podname"),
-		Nodename: c.String("nodename"),
+		Images:    c.Args().Slice(),
+		Step:      int32(c.Int("concurrent")),
+		Podname:   c.String("podname"),
+		Nodenames: c.StringSlice("nodename"),
 	}
 
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 	resp, err := client.CacheImage(context.Background(), opts)
 	if err != nil {
 		return cli.Exit(err, -1)
@@ -200,13 +200,13 @@ func cacheImage(c *cli.Context) error {
 
 func cleanImage(c *cli.Context) error {
 	opts := &pb.RemoveImageOptions{
-		Images:   c.Args().Slice(),
-		Step:     int32(c.Int("concurrent")),
-		Podname:  c.String("podname"),
-		Nodename: c.String("nodename"),
-		Prune:    c.Bool("prune"),
+		Images:    c.Args().Slice(),
+		Step:      int32(c.Int("concurrent")),
+		Podname:   c.String("podname"),
+		Nodenames: c.StringSlice("nodename"),
+		Prune:     c.Bool("prune"),
 	}
-	client := setupAndGetGRPCConnection().GetRPCClient()
+	client := setupAndGetGRPCConnection(c.Context).GetRPCClient()
 	resp, err := client.RemoveImage(context.Background(), opts)
 	if err != nil {
 		return cli.Exit(err, -1)
@@ -248,11 +248,11 @@ func generateBuildOpts(c *cli.Context) *pb.BuildImageOptions {
 	var tar []byte
 	var existID string
 	var buildMethod pb.BuildImageOptions_BuildMethod
-	if exist {
+	switch {
+	case exist:
 		buildMethod = pb.BuildImageOptions_EXIST
 		existID = c.Args().First()
-
-	} else if !raw {
+	case !raw:
 		buildMethod = pb.BuildImageOptions_SCM
 		specURI := c.Args().First()
 		log.Debugf("[Build] Deploy %s", specURI)
@@ -266,21 +266,19 @@ func generateBuildOpts(c *cli.Context) *pb.BuildImageOptions {
 		if err != nil {
 			log.Fatalf("[Build] read spec failed %v", err)
 		}
+		data, err = utils.EnvParser(data)
+		if err != nil {
+			log.Fatalf("[Build] parse env failed %v", err)
+		}
 		specs = &pb.Builds{}
 		if err = yaml.Unmarshal(data, specs); err != nil {
 			log.Fatalf("[Build] unmarshal specs failed %v", err)
 		}
-		// Set value from env
 		for s := range specs.Builds {
 			b := specs.Builds[s]
-			for k, v := range b.Envs {
-				b.Envs[k] = utils.ParseEnvValue(v)
-			}
 			b.StopSignal = stopSignal
-			b.Version = utils.ParseEnvValue(b.Version)
 		}
-
-	} else {
+	default:
 		buildMethod = pb.BuildImageOptions_RAW
 		path := c.Args().First()
 		data, err := dockerengine.CreateTarStream(path)
