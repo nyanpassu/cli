@@ -140,22 +140,18 @@ func generateDeployOptions(c *cli.Context) (*corepb.DeployOptions, error) {
 		return nil, err
 	}
 
-	memLimit, err := utils.ParseRAMInHuman(c.String("memory-limit"))
+	memRequest, memLimit, err := memoryOption(c)
 	if err != nil {
 		return nil, fmt.Errorf("[generateDeployOptions] parse memory failed %v", err)
 	}
-	memRequest, err := utils.ParseRAMInHuman(c.String("memory-request"))
-	if err != nil {
-		return nil, fmt.Errorf("[generateDeployOptions] parse memory failed %v", err)
-	}
-	storageLimit, err := utils.ParseRAMInHuman(c.String("storage-limit"))
+
+	storageRequest, storageLimit, err := storageOption(c)
 	if err != nil {
 		return nil, fmt.Errorf("[generateDeployOptions] parse storage failed %v", err)
 	}
-	storageRequest, err := utils.ParseRAMInHuman(c.String("storage-request"))
-	if err != nil {
-		return nil, fmt.Errorf("[generateDeployOptions] parse storage failed %v", err)
-	}
+
+	cpuRequest, cpuLimit := cpuOption(c)
+
 	specs := &types.Specs{}
 	if err := yaml.Unmarshal(data, specs); err != nil {
 		return nil, fmt.Errorf("[generateDeployOptions] get specs failed %v", err)
@@ -206,20 +202,20 @@ func generateDeployOptions(c *cli.Context) (*corepb.DeployOptions, error) {
 	return &corepb.DeployOptions{
 		Name: specs.Appname,
 		Entrypoint: &corepb.EntrypointOptions{
-			Name:          entry,
-			Command:       entrypoint.Command,
-			Privileged:    entrypoint.Privileged,
-			Dir:           entrypoint.Dir,
-			Log:           logConfig,
-			Publish:       entrypoint.Publish,
-			Healthcheck:   healthCheck,
-			Hook:          hook,
-			RestartPolicy: entrypoint.RestartPolicy,
-			Sysctls:       entrypoint.Sysctls,
+			Name:        entry,
+			Commands:    entrypoint.GetCommands(),
+			Privileged:  entrypoint.Privileged,
+			Dir:         entrypoint.Dir,
+			Log:         logConfig,
+			Publish:     entrypoint.Publish,
+			Healthcheck: healthCheck,
+			Hook:        hook,
+			Restart:     entrypoint.Restart,
+			Sysctls:     entrypoint.Sysctls,
 		},
 		ResourceOpts: &corepb.ResourceOptions{
-			CpuQuotaRequest: c.Float64("cpu-request"),
-			CpuQuotaLimit:   c.Float64("cpu-limit"),
+			CpuQuotaRequest: cpuRequest,
+			CpuQuotaLimit:   cpuLimit,
 			CpuBind:         c.Bool("cpu-bind"),
 			MemoryRequest:   memRequest,
 			MemoryLimit:     memLimit,
@@ -228,8 +224,11 @@ func generateDeployOptions(c *cli.Context) (*corepb.DeployOptions, error) {
 			VolumesRequest:  specs.VolumesRequest,
 			VolumesLimit:    specs.Volumes,
 		},
-		Podname:        c.String("pod"),
-		Nodenames:      c.StringSlice("node"),
+		Podname: c.String("pod"),
+		NodeFilter: &corepb.NodeFilter{
+			Includes: c.StringSlice("node"),
+			Labels:   utils.SplitEquality(c.StringSlice("nodelabel")),
+		},
 		Image:          c.String("image"),
 		Count:          int32(c.Int("count")),
 		Env:            c.StringSlice("env"),
@@ -237,7 +236,6 @@ func generateDeployOptions(c *cli.Context) (*corepb.DeployOptions, error) {
 		Labels:         specs.Labels,
 		Dns:            specs.DNS,
 		ExtraHosts:     specs.ExtraHosts,
-		Nodelabels:     utils.SplitEquality(c.StringSlice("nodelabel")),
 		DeployStrategy: corepb.DeployOptions_Strategy(corepb.DeployOptions_Strategy_value[strings.ToUpper(c.String("deploy-strategy"))]),
 		Data:           utils.ReadAllFiles(c.StringSlice("file")),
 		User:           c.String("user"),

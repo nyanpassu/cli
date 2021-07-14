@@ -5,24 +5,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
+	"text/template"
 	"unsafe"
 
 	"github.com/getlantern/deepcopy"
 	"github.com/pkg/term/termios"
 	corepb "github.com/projecteru2/core/rpc/gen"
-	coreutils "github.com/projecteru2/core/utils"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 var (
 	exitCode     = []byte{91, 101, 120, 105, 116, 99, 111, 100, 101, 93, 32}
-	enter        = []byte{10}
 	winchCommand = []byte{0x80}
 )
 
@@ -41,12 +40,12 @@ type Stream struct {
 
 // HandleStream will handle a stream with send and recv method
 // with or without interactive mode
-func HandleStream(interactive bool, iStream Stream, exitCount int) (code int, err error) {
+func HandleStream(interactive bool, iStream Stream, exitCount int, printWorkloadID bool) (code int, err error) {
 	if interactive { // nolint
 		stdinFd := os.Stdin.Fd()
-		terminal := &syscall.Termios{}
+		terminal := &unix.Termios{}
 		_ = termios.Tcgetattr(stdinFd, terminal)
-		terminalBak := &syscall.Termios{}
+		terminalBak := &unix.Termios{}
 		_ = deepcopy.Copy(terminalBak, terminal)
 		defer func() { _ = termios.Tcsetattr(stdinFd, termios.TCSANOW, terminalBak) }()
 
@@ -125,8 +124,17 @@ func HandleStream(interactive bool, iStream Stream, exitCount int) (code int, er
 		}()
 	}
 
+	outputTemplate := `{{printf "%s" .Data}}`
+	if printWorkloadID {
+		outputTemplate = `[{{.WorkloadId}}] {{printf "%s" .Data}}`
+	}
+
+	outputT, err := template.New("output").Parse(outputTemplate)
+	if err != nil {
+		return -1, err
+	}
+
 	exited := 0
-	output := map[string][]byte{}
 	for {
 		msg, err := iStream.Recv()
 		if err == io.EOF {
@@ -134,6 +142,17 @@ func HandleStream(interactive bool, iStream Stream, exitCount int) (code int, er
 		}
 		if err != nil {
 			return -1, err
+		}
+
+		// error should be printed and skipped
+		if msg.StdStreamType == corepb.StdStreamType_ERUERROR {
+			logrus.Errorf("[Error From ERU] %s", string(msg.Data))
+			continue
+		}
+
+		if msg.StdStreamType == corepb.StdStreamType_TYPEWORKLOADID {
+			logrus.Infof("[WorkloadID] %s", msg.WorkloadId)
+			continue
 		}
 
 		if bytes.HasPrefix(msg.Data, exitCode) {
@@ -149,26 +168,15 @@ func HandleStream(interactive bool, iStream Stream, exitCount int) (code int, er
 			continue
 		}
 
-		if interactive {
-			fmt.Printf("%s", msg.Data)
-		} else {
-			id := coreutils.ShortID(msg.WorkloadId)
-			if _, ok := output[id]; !ok {
-				output[id] = []byte{}
-			}
-
-			output[id] = append(output[id], msg.Data...)
-
-			if bytes.HasSuffix(output[id], enter) {
-				fmt.Printf("[%s]: %s", id, output[id])
-				output[id] = []byte{}
-			}
+		var outStream *os.File
+		switch msg.StdStreamType {
+		case corepb.StdStreamType_STDOUT:
+			outStream = os.Stdout
+		default:
+			outStream = os.Stderr
 		}
-	}
-
-	for id, o := range output {
-		if len(o) > 0 {
-			fmt.Printf("[%s]: %s", id, output[id])
+		if err := outputT.Execute(outStream, msg); err != nil {
+			logrus.Errorf("[HandleStream] Render template error: %v", err)
 		}
 	}
 

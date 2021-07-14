@@ -2,11 +2,13 @@ package describe
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	corepb "github.com/projecteru2/core/rpc/gen"
+	"github.com/sirupsen/logrus"
 )
 
 // Nodes describes a list of Node
@@ -25,18 +27,33 @@ func Nodes(nodes ...*corepb.Node) {
 func describeNodes(nodes []*corepb.Node) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{"Name", "Endpoint"})
+	t.AppendHeader(table.Row{"Name", "Endpoint", "Status", "CPU", "Memory", "Volume", "Storage"})
 
-	nameRow := []string{}
-	endpointRow := []string{}
 	for _, node := range nodes {
-		nameRow = append(nameRow, node.Name)
-		endpointRow = append(endpointRow, node.Endpoint)
-	}
-	rows := [][]string{nameRow, endpointRow}
+		totalVolumeCap := int64(0)
+		for _, v := range node.InitVolume {
+			totalVolumeCap += v
+		}
 
-	t.AppendRows(toTableRows(rows))
-	t.AppendSeparator()
+		var status string
+		if node.Available {
+			status = "UP"
+		} else {
+			status = "DOWN"
+		}
+		rows := [][]string{
+			{node.Name},
+			{node.Endpoint},
+			{status},
+			{fmt.Sprintf("%.2f / %d", node.CpuUsed, len(node.InitCpu))},
+			{fmt.Sprintf("%d / %d bytes", node.MemoryUsed, node.InitMemory)},
+			{fmt.Sprintf("%d / %d bytes", node.VolumeUsed, totalVolumeCap)},
+			{fmt.Sprintf("%d / %d bytes", node.StorageUsed, node.InitStorage)},
+		}
+		t.AppendRows(toTableRows(rows))
+		t.AppendSeparator()
+	}
+
 	t.SetStyle(table.StyleLight)
 	t.Render()
 }
@@ -44,6 +61,10 @@ func describeNodes(nodes []*corepb.Node) {
 // NodeResources describes a list of NodeResource
 // output format can be json or yaml or table
 func NodeResources(resources ...*corepb.NodeResource) {
+	for _, resource := range resources {
+		checkNaNForResource(resource)
+	}
+
 	switch {
 	case isJSON():
 		describeAsJSON(resources)
@@ -51,6 +72,21 @@ func NodeResources(resources ...*corepb.NodeResource) {
 		describeAsYAML(resources)
 	default:
 		describeNodeResources(resources)
+	}
+}
+
+func checkNaNForResource(resource *corepb.NodeResource) {
+	if math.IsNaN(resource.VolumePercent) {
+		resource.VolumePercent = 0
+	}
+	if math.IsNaN(resource.MemoryPercent) {
+		resource.MemoryPercent = 0
+	}
+	if math.IsNaN(resource.StoragePercent) {
+		resource.StoragePercent = 0
+	}
+	if math.IsNaN(resource.CpuPercent) {
+		resource.CpuPercent = 0
 	}
 }
 
@@ -79,4 +115,27 @@ func describeNodeResources(resources []*corepb.NodeResource) {
 	t.AppendSeparator()
 	t.SetStyle(table.StyleLight)
 	t.Render()
+}
+
+// NodeStatusMessage describes NodeStatusStreamMessage
+// in json / yaml, or just a line in stdout
+func NodeStatusMessage(ms ...*corepb.NodeStatusStreamMessage) {
+	switch {
+	case isJSON():
+		describeAsJSON(ms)
+	case isYAML():
+		describeAsYAML(ms)
+	default:
+		describeNodeStatusMessage(ms)
+	}
+}
+
+func describeNodeStatusMessage(ms []*corepb.NodeStatusStreamMessage) {
+	for _, m := range ms {
+		if m.Error != "" {
+			logrus.Errorf("[WatchNodeStatus] Error when get status for node %s: %s", m.Nodename, m.Error)
+		} else {
+			logrus.Infof("[WatchNodeStatus] Node %s on pod %s, alive: %v", m.Nodename, m.Podname, m.Alive)
+		}
+	}
 }

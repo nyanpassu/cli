@@ -54,8 +54,9 @@ func describeWorkloads(workloads []*corepb.Workload) {
 		rows := [][]string{
 			{c.Name, c.Id, c.Podname, c.Nodename},
 			{
-				fmt.Sprintf("QuotaRequest: %f", c.Resource.CpuQuotaRequest),
-				fmt.Sprintf("QuotaLimit: %f", c.Resource.CpuQuotaLimit),
+				fmt.Sprintf("CPUQuotaRequest: %f", c.Resource.CpuQuotaRequest),
+				fmt.Sprintf("CPUQuotaLimit: %f", c.Resource.CpuQuotaLimit),
+				fmt.Sprintf("CPUMap: %v", c.Resource.Cpu),
 				fmt.Sprintf("MemoryRequest: %v", c.Resource.MemoryRequest),
 				fmt.Sprintf("MemoryLimit: %v", c.Resource.MemoryLimit),
 				fmt.Sprintf("StorageRequest: %v", c.Resource.StorageRequest),
@@ -63,6 +64,8 @@ func describeWorkloads(workloads []*corepb.Workload) {
 				fmt.Sprintf("Privileged: %v", c.Privileged),
 			},
 			{
+				fmt.Sprintf("VolumesRequest: %+v", c.Resource.VolumesRequest),
+				fmt.Sprintf("VolumesLimit: %+v", c.Resource.VolumesLimit),
 				fmt.Sprintf("VolumePlanRequest: %+v", c.Resource.VolumePlanRequest),
 				fmt.Sprintf("VolumePlanLimit: %+v", c.Resource.VolumePlanLimit),
 			},
@@ -103,8 +106,10 @@ func describeWorkloadStatuses(workloadStatuses []*corepb.WorkloadStatus) {
 
 		// extensions
 		extensions := map[string]string{}
-		if err := json.Unmarshal(s.Extension, &extensions); err != nil {
-			continue
+		if len(s.Extension) != 0 {
+			if err := json.Unmarshal(s.Extension, &extensions); err != nil {
+				continue
+			}
 		}
 		es := []string{}
 		for k, v := range extensions {

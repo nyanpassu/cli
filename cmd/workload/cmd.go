@@ -221,6 +221,11 @@ func Command() *cli.Command {
 						Usage: "cpu limit increment/decrement",
 						Value: 0,
 					},
+					&cli.Float64Flag{
+						Name:  "cpu",
+						Usage: "shortcut to set cpu-limit/request equally to this value",
+						Value: 0,
+					},
 					&cli.StringFlag{
 						Name:  "memory-request",
 						Usage: "memory request increment/decrement, like -1M or 1G, support K, M, G, T",
@@ -228,6 +233,10 @@ func Command() *cli.Command {
 					&cli.StringFlag{
 						Name:  "memory-limit",
 						Usage: "memory limit increment/decrement, like -1M or 1G, support K, M, G, T",
+					},
+					&cli.StringFlag{
+						Name:  "memory",
+						Usage: "shortcut to set memory-limit/request equally to this value",
 					},
 					&cli.StringFlag{
 						Name:  "volumes-request",
@@ -252,6 +261,10 @@ func Command() *cli.Command {
 					&cli.StringFlag{
 						Name:  "storage-limit",
 						Usage: `storage limit incr/decr, like "-1G"`,
+					},
+					&cli.StringFlag{
+						Name:  "storage",
+						Usage: "shortcut to set storage-limit/request equally to this value",
 					},
 				},
 			},
@@ -399,6 +412,11 @@ func Command() *cli.Command {
 						Usage: "how many cpu to limit; can specify limit without request",
 						Value: 1.0,
 					},
+					&cli.Float64Flag{
+						Name:  "cpu",
+						Usage: "shortcut for cpu-request/limit, set them equally to this value",
+						Value: 1.0,
+					},
 					&cli.StringFlag{
 						Name:  "memory-request",
 						Usage: "how many memory to request like 1M or 1G, support K, M, G, T",
@@ -407,6 +425,11 @@ func Command() *cli.Command {
 					&cli.StringFlag{
 						Name:  "memory-limit",
 						Usage: "how many memory to limit like 1M or 1G, support K, M, G, T; can specify limit without request",
+						Value: "512M",
+					},
+					&cli.StringFlag{
+						Name:  "memory",
+						Usage: "shortcut for memory-request/limit, set them equally to this value",
 						Value: "512M",
 					},
 					&cli.StringFlag{
@@ -419,6 +442,11 @@ func Command() *cli.Command {
 						Usage: "how many storage to limit quota like 1M or 1G, support K, M, G, T; can specify limit without request",
 						Value: "",
 					},
+					&cli.StringFlag{
+						Name:  "storage",
+						Usage: "shortcut for storage-request/limit, set them equally to this value",
+						Value: "",
+					},
 					&cli.StringSliceFlag{
 						Name:  "env",
 						Usage: "set env can use multiple times, e.g., GO111MODULE=on",
@@ -429,7 +457,7 @@ func Command() *cli.Command {
 					},
 					&cli.StringFlag{
 						Name:  "deploy-strategy",
-						Usage: "deploy method auto/fill/each/global/fillglobal",
+						Usage: "deploy method auto/fill/each/global/dummy",
 						Value: strategy.Auto,
 					},
 					&cli.StringFlag{
@@ -477,4 +505,62 @@ func Command() *cli.Command {
 			},
 		},
 	}
+}
+
+// returns --memory-request, --memory-limit
+// or shortcut --memory to override them
+func memoryOption(c *cli.Context) (int64, int64, error) {
+	memRequest, err := utils.ParseRAMInHuman(c.String("memory-request"))
+	if err != nil {
+		return 0, 0, err
+	}
+
+	memLimit, err := utils.ParseRAMInHuman(c.String("memory-limit"))
+	if err != nil {
+		return 0, 0, err
+	}
+	// if cpu shortcut is set, then override the above
+	if c.IsSet("memory") {
+		if memory, err := utils.ParseRAMInHuman(c.String("memory")); err == nil {
+			memRequest = memory
+			memLimit = memory
+		}
+	}
+	return memRequest, memLimit, nil
+}
+
+// returns --storage-request, --storage-limit
+// or shortcut --storage to override them
+func storageOption(c *cli.Context) (int64, int64, error) {
+	storageRequest, err := utils.ParseRAMInHuman(c.String("storage-request"))
+	if err != nil {
+		return 0, 0, err
+	}
+
+	storageLimit, err := utils.ParseRAMInHuman(c.String("storage-limit"))
+	if err != nil {
+		return 0, 0, err
+	}
+	// if storage shortcut is set, then override the above
+	if c.IsSet("storage") {
+		if storage, err := utils.ParseRAMInHuman(c.String("storage")); err == nil {
+			storageRequest = storage
+			storageLimit = storage
+		}
+	}
+	return storageRequest, storageLimit, nil
+}
+
+// returns --cpu-request, --cpu-limit
+// or shortcut --cpu to override them
+func cpuOption(c *cli.Context) (float64, float64) {
+	cpuRequest := c.Float64("cpu-request")
+	cpuLimit := c.Float64("cpu-limit")
+	// if cpu shortcut is set, then override the above
+	if c.IsSet("cpu") {
+		cpu := c.Float64("cpu")
+		cpuRequest = cpu
+		cpuLimit = cpu
+	}
+	return cpuRequest, cpuLimit
 }
